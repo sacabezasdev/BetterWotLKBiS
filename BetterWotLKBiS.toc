@@ -1,0 +1,9 @@
+## Interface: 30300
+## Title: BetterWotLKBiS
+## Notes: Best-in-slot guide and chat upgrade alerts for WotLK 3.3.5.
+## Author: Santiago & Codex
+## Version: 0.1.0
+## SavedVariables: BetterWotLKBiSDB
+
+Data.lua
+Core.lua
