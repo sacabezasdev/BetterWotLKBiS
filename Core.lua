@@ -10,6 +10,8 @@ local SLOT_LABEL_WIDTH = 92
 local ITEM_SIZE = 40
 local ITEM_GAP = 8
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
+local MINIMAP_BUTTON_RADIUS = 80
+local MINIMAP_BUTTON_DRAG_THRESHOLD = 16
 
 local DEFAULTS = {
     alertChannels = {
@@ -21,6 +23,10 @@ local DEFAULTS = {
         channel = true,
     },
     popWindow = true,
+    minimap = {
+        show = true,
+        angle = 220,
+    },
     selectedClass = "Paladin",
     selectedSpec = "Holy",
     selectedPhase = "P4",
@@ -149,6 +155,31 @@ local function GetPhaseLabel(phaseKey)
         return phaseKey or ""
     end
     return addon.phaseByKey[phaseKey].label
+end
+
+local function GetAtan2(y, x)
+    if math.atan2 then
+        return math.atan2(y, x)
+    end
+
+    if x > 0 then
+        return math.atan(y / x)
+    elseif x < 0 and y >= 0 then
+        return math.atan(y / x) + math.pi
+    elseif x < 0 and y < 0 then
+        return math.atan(y / x) - math.pi
+    elseif x == 0 and y > 0 then
+        return math.pi / 2
+    elseif x == 0 and y < 0 then
+        return -math.pi / 2
+    end
+
+    return 0
+end
+
+local function GetMinimapCoordinates(angle)
+    local radians = math.rad(angle or DEFAULTS.minimap.angle)
+    return math.cos(radians) * MINIMAP_BUTTON_RADIUS, math.sin(radians) * MINIMAP_BUTTON_RADIUS
 end
 
 local function SetFrameBackdrop(frame, alpha)
@@ -766,6 +797,162 @@ function addon:CreateHeader(parent)
     return header
 end
 
+function addon:PositionMinimapButton()
+    if not self.minimapButton or not Minimap then
+        return
+    end
+
+    local angle = self.db and self.db.minimap and self.db.minimap.angle or DEFAULTS.minimap.angle
+    local x, y = GetMinimapCoordinates(angle)
+
+    self.minimapButton:ClearAllPoints()
+    self.minimapButton:SetPoint("CENTER", Minimap, "CENTER", x, y)
+end
+
+function addon:UpdateMinimapButtonDrag(button)
+    if not button.isMouseDown or not Minimap or not GetCursorPosition then
+        return
+    end
+
+    local rawX, rawY = GetCursorPosition()
+    if not rawX or not rawY then
+        return
+    end
+
+    local moveX = rawX - (button.downX or rawX)
+    local moveY = rawY - (button.downY or rawY)
+    if not button.isDragging and (moveX * moveX + moveY * moveY) < MINIMAP_BUTTON_DRAG_THRESHOLD then
+        return
+    end
+
+    button.isDragging = true
+
+    local mapX, mapY = Minimap:GetCenter()
+    if not mapX or not mapY then
+        return
+    end
+
+    local scale = Minimap:GetEffectiveScale() or 1
+    if scale == 0 then
+        scale = 1
+    end
+
+    local cursorX, cursorY = rawX / scale, rawY / scale
+    local angle = math.deg(GetAtan2(cursorY - mapY, cursorX - mapX))
+    if angle < 0 then
+        angle = angle + 360
+    end
+
+    self.db.minimap.angle = angle
+    self:PositionMinimapButton()
+end
+
+function addon:RefreshMinimapButton()
+    if not self.minimapButton then
+        self:CreateMinimapButton()
+    end
+
+    if not self.minimapButton then
+        return
+    end
+
+    self:PositionMinimapButton()
+
+    if self.db.minimap.show then
+        self.minimapButton:Show()
+    else
+        self.minimapButton:Hide()
+    end
+end
+
+function addon:CreateMinimapButton()
+    if self.minimapButton or not Minimap then
+        return
+    end
+
+    local button = CreateFrame("Button", "BetterWotLKBiSMinimapButton", Minimap)
+    button:SetWidth(31)
+    button:SetHeight(31)
+    button:SetFrameStrata("MEDIUM")
+    button:EnableMouse(true)
+    button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
+    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
+
+    local background = button:CreateTexture(nil, "BACKGROUND")
+    background:SetWidth(20)
+    background:SetHeight(20)
+    background:SetPoint("CENTER", button, "CENTER", 0, 0)
+    background:SetTexture("Interface\\Minimap\\UI-Minimap-Background")
+
+    local icon = button:CreateTexture(nil, "ARTWORK")
+    icon:SetWidth(20)
+    icon:SetHeight(20)
+    icon:SetPoint("CENTER", button, "CENTER", 0, 0)
+    icon:SetTexture("Interface\\Icons\\INV_Misc_Book_11")
+    icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+
+    local border = button:CreateTexture(nil, "OVERLAY")
+    border:SetWidth(53)
+    border:SetHeight(53)
+    border:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+    border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
+
+    button.icon = icon
+    button:SetScript("OnMouseDown", function(self, mouseButton)
+        if mouseButton ~= "LeftButton" then
+            return
+        end
+
+        self.isMouseDown = true
+        self.isDragging = false
+        self.downX, self.downY = GetCursorPosition()
+        self:SetScript("OnUpdate", function(dragButton) addon:UpdateMinimapButtonDrag(dragButton) end)
+    end)
+
+    button:SetScript("OnMouseUp", function(self, mouseButton)
+        if mouseButton == "LeftButton" then
+            if self.isMouseDown and not self.isDragging and GetCursorPosition then
+                local upX, upY = GetCursorPosition()
+                local moveX = upX and self.downX and (upX - self.downX) or 0
+                local moveY = upY and self.downY and (upY - self.downY) or 0
+                if (moveX * moveX + moveY * moveY) >= MINIMAP_BUTTON_DRAG_THRESHOLD then
+                    addon:UpdateMinimapButtonDrag(self)
+                end
+            end
+
+            local wasDragging = self.isDragging
+            self.isMouseDown = false
+            self.isDragging = false
+            self:SetScript("OnUpdate", nil)
+
+            if not wasDragging then
+                addon:CreateMainFrame()
+            end
+        elseif mouseButton == "RightButton" then
+            addon:OpenOptions()
+        end
+    end)
+
+    button:SetScript("OnHide", function(self)
+        self.isMouseDown = false
+        self.isDragging = false
+        self:SetScript("OnUpdate", nil)
+    end)
+
+    button:SetScript("OnEnter", function(self)
+        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+        GameTooltip:AddLine("BetterWotLKBiS", 1, 0.82, 0)
+        GameTooltip:AddLine("Left-click: Open BiS list", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Right-click: Options", 0.8, 0.8, 0.8)
+        GameTooltip:AddLine("Drag: Move button", 0.8, 0.8, 0.8)
+        GameTooltip:Show()
+    end)
+    button:SetScript("OnLeave", function() GameTooltip:Hide() end)
+
+    self.minimapButton = button
+    self:PositionMinimapButton()
+end
+
 function addon:CreateMainFrame()
     if self.mainFrame then
         if self.mainFrame:IsShown() then
@@ -971,10 +1158,23 @@ function addon:CreateOptionsPanel()
     end)
     self.popCheck = pop
 
+    local minimap = CreateFrame("CheckButton", nil, panel, "UICheckButtonTemplate")
+    minimap:SetPoint("TOPLEFT", pop, "BOTTOMLEFT", 0, -8)
+    minimap:SetWidth(24)
+    minimap:SetHeight(24)
+    minimap.text = minimap:CreateFontString(nil, "ARTWORK", "GameFontNormal")
+    minimap.text:SetPoint("LEFT", minimap, "RIGHT", 3, 0)
+    minimap.text:SetText("Show minimap button")
+    minimap:SetScript("OnClick", function(self)
+        addon.db.minimap.show = self:GetChecked() and true or false
+        addon:RefreshMinimapButton()
+    end)
+    self.minimapCheck = minimap
+
     local open = CreateFrame("Button", nil, panel, "UIPanelButtonTemplate")
     open:SetWidth(130)
     open:SetHeight(24)
-    open:SetPoint("TOPLEFT", pop, "BOTTOMLEFT", 0, -20)
+    open:SetPoint("TOPLEFT", minimap, "BOTTOMLEFT", 0, -20)
     open:SetText("Open BiS List")
     open:SetScript("OnClick", function() addon:CreateMainFrame() end)
 
@@ -983,6 +1183,7 @@ function addon:CreateOptionsPanel()
             check:SetChecked(addon.db.alertChannels[key])
         end
         addon.popCheck:SetChecked(addon.db.popWindow)
+        addon.minimapCheck:SetChecked(addon.db.minimap.show)
     end)
 
     InterfaceOptions_AddCategory(panel)
@@ -1032,6 +1233,7 @@ function addon:ADDON_LOADED(addonName)
     self:BuildIndex()
     self:NormalizeSelection()
     self:CreateOptionsPanel()
+    self:RefreshMinimapButton()
     self:RegisterChatEvents()
 
     self:RegisterEvent("PLAYER_LOGIN")
@@ -1048,6 +1250,7 @@ end
 
 function addon:PLAYER_LOGIN()
     self:SelectPlayerList()
+    self:RefreshMinimapButton()
     self:RefreshMainFrame()
 end
 

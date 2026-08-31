@@ -20,6 +20,7 @@ and tooltips in-game through the client cache.
 - Upgrade comparison against currently equipped gear.
 - Sound alert plus visual warning when a linked item is better.
 - Optional movable center popup with item icon and clickable item link.
+- Movable minimap button for quick access.
 - Interface/AddOns configuration panel.
 - SavedVariables support through `BetterWotLKBiSDB`.
 
@@ -30,6 +31,12 @@ and tooltips in-game through the client cache.
 - `/wotlkbis`
 
 Use any of these commands to open or close the BiS browser.
+
+The minimap button can also be used:
+
+- Left-click opens or closes the BiS browser.
+- Right-click opens the addon options.
+- Drag moves the button around the minimap.
 
 Additional slash options:
 
@@ -48,6 +55,7 @@ The Interface/AddOns panel exposes:
   - Raid
   - Custom/global channels
 - Center popup on/off.
+- Minimap button on/off.
 - A button to open the BiS list UI.
 
 ## Supported Lists
