@@ -133,9 +133,11 @@ the equipped ranked item or items in that slot. Equipped items are valued by
 their best known all-phase ranking, so any ranked item from a later phase is
 treated as better than any ranked item from an earlier phase.
 
-Because comparison is based on `itemID`, item links should work even when the
-visible item name is in another language. Plain text item names and Wowhead URLs
-are not scanned as item links.
+Exact `itemID` matches are preferred. When linked and equipped items share the
+same item name and equipment slot, the addon also compares item level so a
+higher-ilvl heroic variant can alert over the normal version while an
+equal-or-higher equipped variant suppresses lower links. Plain text item names
+and Wowhead URLs are not scanned as item links.
 
 If `ClassLoot` is enabled, BetterWotLKBiS also uses its class/spec star data as
 an optional compatibility filter. `ClassLoot` does not replace the Wowhead rank

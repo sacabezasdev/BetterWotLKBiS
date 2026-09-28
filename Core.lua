@@ -188,13 +188,48 @@ local function QueryItem(itemID)
 end
 
 local function GetItemBasics(item)
-    local name, link, quality, _, _, _, _, _, equipLoc, texture = GetItemInfo(item)
+    local name, link, quality, itemLevel, _, _, _, _, equipLoc, texture = GetItemInfo(item)
     if not name then
         local itemID = type(item) == "number" and item or GetItemIDFromLink(item)
         QueryItem(itemID)
-        name, link, quality, _, _, _, _, _, equipLoc, texture = GetItemInfo(item)
+        name, link, quality, itemLevel, _, _, _, _, equipLoc, texture = GetItemInfo(item)
     end
-    return name, link, quality, equipLoc, texture
+    return name, link, quality, itemLevel, equipLoc, texture
+end
+
+local function GetComparableItemInfo(item)
+    local name, _, _, itemLevel, equipLoc = GetItemBasics(item)
+    return name, itemLevel or 0, equipLoc or ""
+end
+
+local function ItemEquipLocMatches(leftEquipLoc, rightEquipLoc)
+    return leftEquipLoc == "" or rightEquipLoc == "" or leftEquipLoc == rightEquipLoc
+end
+
+local function IsSameItemAtLeastItemLevel(candidateItem, targetItem)
+    local candidateName, candidateLevel, candidateEquipLoc = GetComparableItemInfo(candidateItem)
+    local targetName, targetLevel, targetEquipLoc = GetComparableItemInfo(targetItem)
+
+    return candidateName
+        and targetName
+        and candidateName == targetName
+        and candidateLevel > 0
+        and targetLevel > 0
+        and candidateLevel >= targetLevel
+        and ItemEquipLocMatches(candidateEquipLoc, targetEquipLoc)
+end
+
+local function IsHigherItemLevelVariant(candidateItem, targetItem)
+    local candidateName, candidateLevel, candidateEquipLoc = GetComparableItemInfo(candidateItem)
+    local targetName, targetLevel, targetEquipLoc = GetComparableItemInfo(targetItem)
+
+    return candidateName
+        and targetName
+        and candidateName == targetName
+        and candidateLevel > 0
+        and targetLevel > 0
+        and candidateLevel > targetLevel
+        and ItemEquipLocMatches(candidateEquipLoc, targetEquipLoc)
 end
 
 local function GetInventoryID(slotID)
@@ -218,7 +253,7 @@ local function GetClassLootAddon()
 end
 
 local function IsTwoHandItem(item)
-    local _, _, _, equipLoc = GetItemBasics(item)
+    local _, _, _, _, equipLoc = GetItemBasics(item)
     return equipLoc == "INVTYPE_2HWEAPON"
 end
 
@@ -526,7 +561,7 @@ function addon:FindKnownSlot(classKey, specKey, itemID, phaseKey)
 end
 
 function addon:GetSlotForItem(classKey, specKey, itemID, itemLink, phaseKey)
-    local _, _, _, equipLoc = GetItemBasics(itemLink or itemID)
+    local _, _, _, _, equipLoc = GetItemBasics(itemLink or itemID)
     local slotName = equipLoc and EQUIP_LOC_TO_SLOT[equipLoc]
 
     if slotName and self:GetItemMeta(classKey, specKey, slotName, itemID, phaseKey) then
@@ -540,7 +575,8 @@ end
 function addon:IsAnyEquipped(itemIDs)
     for _, itemID in ipairs(itemIDs) do
         for slotID = 1, 18 do
-            if GetInventoryID(slotID) == itemID then
+            local equippedID = GetInventoryID(slotID)
+            if equippedID == itemID or (equippedID and IsSameItemAtLeastItemLevel(equippedID, itemID)) then
                 return true
             end
         end
@@ -588,6 +624,8 @@ function addon:GetUpgradeInfo(itemID, itemLink)
     local worstID, worstMeta = nil, nil
     local offHandBlockedByTwoHand = slotName == "Off hand" and IsOffHandBlockedByTwoHand()
     local linkedScore = GetComparisonScore(linkedMeta)
+    local linkedItem = itemLink or itemID
+    local itemLevelUpgrade = false
 
     for _, inventorySlot in ipairs(inventorySlots) do
         local equippedID = GetInventoryID(inventorySlot)
@@ -595,9 +633,15 @@ function addon:GetUpgradeInfo(itemID, itemLink)
             if not (inventorySlot == 17 and offHandBlockedByTwoHand) then
                 emptySlot = true
             end
-        elseif equippedID == itemID then
+        elseif equippedID == itemID or IsSameItemAtLeastItemLevel(equippedID, linkedItem) then
             hasSameItem = true
         else
+            if IsHigherItemLevelVariant(linkedItem, equippedID) then
+                itemLevelUpgrade = true
+                worstID = equippedID
+                worstMeta = self:GetItemMeta(classKey, specKey, slotName, equippedID) or worstMeta or linkedMeta
+            end
+
             -- Equipped items are compared by their best known all-phase ranking so later-phase gear
             -- suppresses older-phase links even when the selected alert phase is earlier.
             local equippedMeta = self:GetItemMeta(classKey, specKey, slotName, equippedID)
@@ -616,7 +660,7 @@ function addon:GetUpgradeInfo(itemID, itemLink)
         return nil
     end
 
-    if emptySlot or (worstID and linkedScore and linkedScore > worstScore) then
+    if emptySlot or itemLevelUpgrade or (worstID and linkedScore and linkedScore > worstScore) then
         return {
             classKey = classKey,
             specKey = specKey,
@@ -784,7 +828,7 @@ function addon:ConfigureItemButton(button, rowData, displayIndex, slotName, phas
     end
 
     local itemID = rowData.ids[1]
-    local name, link, quality, _, texture = GetItemBasics(itemID)
+    local name, link, quality, _, _, texture = GetItemBasics(itemID)
     local r, g, b = 0.55, 0.55, 0.55
 
     if quality and GetItemQualityColor then
@@ -1246,7 +1290,7 @@ function addon:ShowAlertWindow(itemID, itemLink, upgradeInfo)
     end
 
     local frame = self.alertFrame
-    local itemName, resolvedLink, _, _, texture = GetItemBasics(itemLink or itemID)
+    local itemName, resolvedLink, _, _, _, texture = GetItemBasics(itemLink or itemID)
     frame.icon:SetTexture(texture or QUESTION_MARK)
     frame.iconButton.itemID = itemID
     frame.iconButton.itemLink = resolvedLink or itemLink
