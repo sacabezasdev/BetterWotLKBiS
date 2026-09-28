@@ -127,19 +127,30 @@ source entries.
 ## Upgrade Alerts
 
 When an enabled chat channel contains a real WoW item link, the addon extracts
-the internal `itemID`, checks the player's detected class/spec, finds the ranked
-BiS entry for that slot, and compares it against the equipped item or items in
-that slot.
+the internal `itemID`, checks the player's detected class/spec, uses the
+selected phase's ranked BiS entries for that slot, and compares the link against
+the equipped ranked item or items in that slot. Equipped items are valued by
+their best known all-phase ranking, so any ranked item from a later phase is
+treated as better than any ranked item from an earlier phase.
 
 Because comparison is based on `itemID`, item links should work even when the
 visible item name is in another language. Plain text item names and Wowhead URLs
 are not scanned as item links.
 
+If `ClassLoot` is enabled, BetterWotLKBiS also uses its class/spec star data as
+an optional compatibility filter. `ClassLoot` does not replace the Wowhead rank
+order, but it can suppress an alert when the linked item is known by ClassLoot
+and is not rated for the detected class/spec.
+
 The alert is suppressed when:
 
 - The item is already equipped.
-- The item is not present in the current class/spec BiS data.
-- The current equipped item has an equal or better internal ranking.
+- The item is not present in the selected phase's current class/spec BiS data.
+- The current equipped item has an equal or better phase-aware ranking.
+- The equipped item in the replacement slot is not ranked in any supported phase.
+- ClassLoot knows the linked item but does not rate it for the current class/spec.
+- The linked item is an off-hand item but the apparent empty off-hand slot is
+  caused by an equipped two-handed weapon.
 - The chat channel is disabled in the addon options.
 - The current class/spec has no supported list.
 
@@ -163,6 +174,8 @@ guides, and only item IDs plus short ranking labels are stored in the addon.
   Phase 3 URL redirects to a Classic guide instead of a WotLK guide.
 - The addon does not evaluate stat weights dynamically. It follows the rank
   order from the stored Wowhead lists.
+- `ClassLoot` is used only as an optional class/spec compatibility signal, not as
+  a full gear ranking or stat comparison engine.
 - The addon does not parse plain item names, pasted Wowhead URLs, or arbitrary
   text. It scans WoW item links with `|Hitem:...|h[...]|h`.
 - In-game item names and icons may appear as placeholders until the client has

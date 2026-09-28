@@ -44,6 +44,60 @@ local CHAT_EVENT_TO_KEY = {
     CHAT_MSG_CHANNEL = "channel",
 }
 
+local CLASSLOOT_SPEC_KEYS = {
+    DeathKnight = {
+        Blood = { "DeathknightTank" },
+        Frost = { "DeathknightDPS" },
+        Unholy = { "DeathknightDPS" },
+    },
+    Druid = {
+        Balance = { "DruidBalance" },
+        FeralDPS = { "DruidFeral" },
+        FeralTank = { "DruidFeral" },
+        Restoration = { "DruidResto", "DruidHealing" },
+    },
+    Hunter = {
+        BeastMastery = { "Hunter" },
+        Marksmanship = { "Hunter" },
+        Survival = { "Hunter" },
+    },
+    Mage = {
+        Arcane = { "Mage" },
+        Fire = { "Mage" },
+        Frost = { "Mage" },
+    },
+    Paladin = {
+        Holy = { "PaladinHoly", "PaladinHealing" },
+        Protection = { "PaladinProt" },
+        Retribution = { "PaladinRet", "PaladinDPS" },
+    },
+    Priest = {
+        Discipline = { "PriestHeal", "Priest" },
+        Holy = { "PriestHeal", "Priest" },
+        Shadow = { "PriestDPS", "Priest" },
+    },
+    Rogue = {
+        Assassination = { "Rogue" },
+        Combat = { "Rogue" },
+        Subtlety = { "Rogue" },
+    },
+    Shaman = {
+        Elemental = { "ShamanElemental", "ShamanDPS" },
+        Enhancement = { "ShamanEnhance", "ShamanDPS" },
+        Restoration = { "ShamanResto", "ShamanHealing" },
+    },
+    Warlock = {
+        Affliction = { "Warlock" },
+        Demonology = { "Warlock" },
+        Destruction = { "Warlock" },
+    },
+    Warrior = {
+        Arms = { "WarriorDPS" },
+        Fury = { "WarriorDPS" },
+        Protection = { "WarriorProt", "WarriorTanking" },
+    },
+}
+
 local EQUIP_LOC_TO_SLOT = {
     INVTYPE_HEAD = "Head",
     INVTYPE_NECK = "Neck",
@@ -66,7 +120,7 @@ local EQUIP_LOC_TO_SLOT = {
     INVTYPE_HOLDABLE = "Off hand",
     INVTYPE_THROWN = "Ranged",
     INVTYPE_RELIC = "Relic",
-    INVTYPE_RANGED = "Wand",
+    INVTYPE_RANGED = "Ranged",
     INVTYPE_RANGEDRIGHT = "Wand",
 }
 
@@ -150,11 +204,38 @@ local function GetInventoryID(slotID)
     return GetItemIDFromLink(GetInventoryItemLink("player", slotID))
 end
 
+local function GetClassLootAddon()
+    if not LibStub then
+        return nil
+    end
+
+    local aceAddon = LibStub("AceAddon-3.0", true)
+    if not aceAddon then
+        return nil
+    end
+
+    return aceAddon:GetAddon("ClassLoot", true)
+end
+
+local function IsTwoHandItem(item)
+    local _, _, _, equipLoc = GetItemBasics(item)
+    return equipLoc == "INVTYPE_2HWEAPON"
+end
+
+local function IsOffHandBlockedByTwoHand()
+    local mainHandID = GetInventoryID(16)
+    return mainHandID and IsTwoHandItem(mainHandID)
+end
+
 local function GetPhaseLabel(phaseKey)
     if not addon.phaseByKey or not addon.phaseByKey[phaseKey] then
         return phaseKey or ""
     end
     return addon.phaseByKey[phaseKey].label
+end
+
+local function GetComparisonScore(meta)
+    return meta and (meta.globalScore or meta.score)
 end
 
 local function GetAtan2(y, x)
@@ -219,34 +300,49 @@ end
 
 function addon:BuildIndex()
     self.itemIndex = {}
+    self.phaseItemIndex = {}
 
     for classKey, specs in pairs(DATA.lists) do
         self.itemIndex[classKey] = {}
+        self.phaseItemIndex[classKey] = {}
 
         for specKey, phases in pairs(specs) do
             self.itemIndex[classKey][specKey] = {}
+            self.phaseItemIndex[classKey][specKey] = {}
 
             for phaseIndex, phase in ipairs(DATA.phases) do
                 local slots = phases[phase.key]
                 if slots then
+                    self.phaseItemIndex[classKey][specKey][phase.key] = self.phaseItemIndex[classKey][specKey][phase.key] or {}
+
                     for slotName, rows in pairs(slots) do
                         self.itemIndex[classKey][specKey][slotName] = self.itemIndex[classKey][specKey][slotName] or {}
+                        self.phaseItemIndex[classKey][specKey][phase.key][slotName] = self.phaseItemIndex[classKey][specKey][phase.key][slotName] or {}
 
                         for rankIndex, row in ipairs(rows) do
-                            local score = phaseIndex * 1000 - rankIndex
+                            local score = 1000 - rankIndex
+                            local globalScore = phaseIndex * 1000 + score
                             for _, itemID in ipairs(row.ids) do
+                                local meta = {
+                                    score = score,
+                                    globalScore = globalScore,
+                                    phaseIndex = phaseIndex,
+                                    phaseKey = phase.key,
+                                    phaseLabel = phase.label,
+                                    rankIndex = rankIndex,
+                                    rankLabel = row.label,
+                                    slotName = slotName,
+                                    row = row,
+                                }
+
+                                local phaseCurrent = self.phaseItemIndex[classKey][specKey][phase.key][slotName][itemID]
+                                if not phaseCurrent or score > phaseCurrent.score then
+                                    self.phaseItemIndex[classKey][specKey][phase.key][slotName][itemID] = meta
+                                end
+
                                 local current = self.itemIndex[classKey][specKey][slotName][itemID]
-                                if not current or score > current.score then
-                                    self.itemIndex[classKey][specKey][slotName][itemID] = {
-                                        score = score,
-                                        phaseIndex = phaseIndex,
-                                        phaseKey = phase.key,
-                                        phaseLabel = phase.label,
-                                        rankIndex = rankIndex,
-                                        rankLabel = row.label,
-                                        slotName = slotName,
-                                        row = row,
-                                    }
+                                if not current or globalScore > current.globalScore then
+                                    self.itemIndex[classKey][specKey][slotName][itemID] = meta
                                 end
                             end
                         end
@@ -334,6 +430,37 @@ function addon:GetComparisonClassSpec()
     return nil, nil
 end
 
+function addon:GetComparisonPhaseKey()
+    if self.db and self.phaseByKey and self.phaseByKey[self.db.selectedPhase] then
+        return self.db.selectedPhase
+    end
+
+    return DATA.phases[#DATA.phases].key
+end
+
+function addon:GetClassLootRating(classKey, specKey, itemID)
+    local classLoot = GetClassLootAddon()
+    local itemInfo = classLoot and classLoot.CD and classLoot.CD[itemID]
+    if not itemInfo then
+        return nil
+    end
+
+    local specKeys = CLASSLOOT_SPEC_KEYS[classKey] and CLASSLOOT_SPEC_KEYS[classKey][specKey]
+    if not specKeys then
+        return nil
+    end
+
+    local bestRating = 0
+    for _, classLootKey in ipairs(specKeys) do
+        local rating = tonumber(itemInfo[classLootKey])
+        if rating and rating > bestRating then
+            bestRating = rating
+        end
+    end
+
+    return bestRating
+end
+
 function addon:NormalizeSelection()
     if not self.classByKey[self.db.selectedClass] then
         self.db.selectedClass = self:GetFirstClass().key
@@ -360,17 +487,26 @@ function addon:SelectPlayerList()
     self:NormalizeSelection()
 end
 
-function addon:GetItemMeta(classKey, specKey, slotName, itemID)
-    local classIndex = self.itemIndex[classKey]
+function addon:GetItemMeta(classKey, specKey, slotName, itemID, phaseKey)
+    local rootIndex = phaseKey and self.phaseItemIndex or self.itemIndex
+    local classIndex = rootIndex and rootIndex[classKey]
     local specIndex = classIndex and classIndex[specKey]
+    if phaseKey then
+        specIndex = specIndex and specIndex[phaseKey]
+    end
     local slotIndex = specIndex and specIndex[slotName]
     return slotIndex and slotIndex[itemID]
 end
 
-function addon:FindKnownSlot(classKey, specKey, itemID)
-    local classIndex = self.itemIndex[classKey]
+function addon:FindKnownSlot(classKey, specKey, itemID, phaseKey)
+    local rootIndex = phaseKey and self.phaseItemIndex or self.itemIndex
+    local classIndex = rootIndex and rootIndex[classKey]
     local specIndex = classIndex and classIndex[specKey]
+    if phaseKey then
+        specIndex = specIndex and specIndex[phaseKey]
+    end
     local bestSlot, bestMeta = nil, nil
+    local bestScore = nil
 
     if not specIndex then
         return nil, nil
@@ -378,24 +514,26 @@ function addon:FindKnownSlot(classKey, specKey, itemID)
 
     for slotName, slotIndex in pairs(specIndex) do
         local meta = slotIndex[itemID]
-        if meta and (not bestMeta or meta.score > bestMeta.score) then
+        local score = meta and (phaseKey and meta.score or meta.globalScore or meta.score)
+        if meta and (not bestScore or score > bestScore) then
             bestSlot = slotName
             bestMeta = meta
+            bestScore = score
         end
     end
 
     return bestSlot, bestMeta
 end
 
-function addon:GetSlotForItem(classKey, specKey, itemID, itemLink)
+function addon:GetSlotForItem(classKey, specKey, itemID, itemLink, phaseKey)
     local _, _, _, equipLoc = GetItemBasics(itemLink or itemID)
     local slotName = equipLoc and EQUIP_LOC_TO_SLOT[equipLoc]
 
-    if slotName and self:GetItemMeta(classKey, specKey, slotName, itemID) then
+    if slotName and self:GetItemMeta(classKey, specKey, slotName, itemID, phaseKey) then
         return slotName
     end
 
-    local knownSlot = self:FindKnownSlot(classKey, specKey, itemID)
+    local knownSlot = self:FindKnownSlot(classKey, specKey, itemID, phaseKey)
     return knownSlot or slotName
 end
 
@@ -417,14 +555,20 @@ function addon:GetUpgradeInfo(itemID, itemLink)
         return nil
     end
 
-    local slotName = self:GetSlotForItem(classKey, specKey, itemID, itemLink)
+    local phaseKey = self:GetComparisonPhaseKey()
+    local linkedClassLootRating = self:GetClassLootRating(classKey, specKey, itemID)
+    if linkedClassLootRating == 0 then
+        return nil
+    end
+
+    local slotName = self:GetSlotForItem(classKey, specKey, itemID, itemLink, phaseKey)
     if not slotName then
         return nil
     end
 
-    local linkedMeta = self:GetItemMeta(classKey, specKey, slotName, itemID)
+    local linkedMeta = self:GetItemMeta(classKey, specKey, slotName, itemID, phaseKey)
     if not linkedMeta then
-        local knownSlot, knownMeta = self:FindKnownSlot(classKey, specKey, itemID)
+        local knownSlot, knownMeta = self:FindKnownSlot(classKey, specKey, itemID, phaseKey)
         slotName = knownSlot
         linkedMeta = knownMeta
     end
@@ -442,20 +586,28 @@ function addon:GetUpgradeInfo(itemID, itemLink)
     local emptySlot = false
     local worstScore = 1000000
     local worstID, worstMeta = nil, nil
+    local offHandBlockedByTwoHand = slotName == "Off hand" and IsOffHandBlockedByTwoHand()
+    local linkedScore = GetComparisonScore(linkedMeta)
 
     for _, inventorySlot in ipairs(inventorySlots) do
         local equippedID = GetInventoryID(inventorySlot)
         if not equippedID then
-            emptySlot = true
+            if not (inventorySlot == 17 and offHandBlockedByTwoHand) then
+                emptySlot = true
+            end
         elseif equippedID == itemID then
             hasSameItem = true
         else
+            -- Equipped items are compared by their best known all-phase ranking so later-phase gear
+            -- suppresses older-phase links even when the selected alert phase is earlier.
             local equippedMeta = self:GetItemMeta(classKey, specKey, slotName, equippedID)
-            local equippedScore = equippedMeta and equippedMeta.score or -1
-            if equippedScore < worstScore then
-                worstScore = equippedScore
-                worstID = equippedID
-                worstMeta = equippedMeta
+            if equippedMeta then
+                local equippedScore = GetComparisonScore(equippedMeta)
+                if equippedScore < worstScore then
+                    worstScore = equippedScore
+                    worstID = equippedID
+                    worstMeta = equippedMeta
+                end
             end
         end
     end
@@ -464,14 +616,16 @@ function addon:GetUpgradeInfo(itemID, itemLink)
         return nil
     end
 
-    if emptySlot or linkedMeta.score > worstScore then
+    if emptySlot or (worstID and linkedScore and linkedScore > worstScore) then
         return {
             classKey = classKey,
             specKey = specKey,
+            phaseKey = phaseKey,
             slotName = slotName,
             linkedMeta = linkedMeta,
             currentItemID = worstID,
             currentMeta = worstMeta,
+            linkedClassLootRating = linkedClassLootRating,
         }
     end
 
